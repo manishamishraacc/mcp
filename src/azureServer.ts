@@ -171,21 +171,30 @@ app.get('/tools', async (req, res) => {
     // Check if ElevenLabs expects Server-Sent Events format
     const acceptHeader = req.get('Accept');
     if (acceptHeader && acceptHeader.includes('text/event-stream')) {
-      console.log('📡 ElevenLabs expects SSE format - sending as Server-Sent Events');
+      console.log('📡 ElevenLabs expects SSE format - implementing MCP SSE protocol');
       
-      // Set SSE headers
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control'
-      });
-      
-      // Send tools as SSE format
-      res.write(`event: tools\n`);
-      res.write(`data: ${JSON.stringify(formattedTools)}\n\n`);
-      res.end();
+      try {
+        // Create SSE transport for proper MCP protocol
+        const transport = new SSEServerTransport('/tools', res);
+        sessions.set(transport.sessionId, transport);
+        
+        console.log(`📡 Created SSE session for tools: ${transport.sessionId}`);
+        
+        // Create MCP connection
+        const connection = await mcpServer.createConnection(transport);
+        
+        // Handle connection cleanup
+        res.on('close', () => {
+          console.log(`🔌 Tools SSE session closed: ${transport.sessionId}`);
+          sessions.delete(transport.sessionId);
+          void connection.close().catch(e => console.error('Error closing tools connection:', e));
+        });
+        
+        return; // Don't send additional response
+      } catch (error) {
+        console.error('❌ Error setting up tools SSE connection:', error);
+        return res.status(500).end('Tools SSE setup failed');
+      }
     } else {
       console.log('📄 Browser request - sending as JSON');
       // IMPORTANT: Return a raw array (not wrapped in an object) for browser
