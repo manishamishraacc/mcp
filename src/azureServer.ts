@@ -16,9 +16,13 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 const app = express();
 const port = parseInt(process.env.PORT || '3000', 10);
 
-// Security middleware
+// Security middleware - configured for ElevenLabs integration
 app.use(helmet({
-  contentSecurityPolicy: false // Disable for browser automation
+  contentSecurityPolicy: false, // Disable for browser automation
+  referrerPolicy: { policy: "no-referrer-when-downgrade" }, // Allow cross-origin requests
+  crossOriginEmbedderPolicy: false, // Allow embedding
+  crossOriginOpenerPolicy: false, // Allow cross-origin opening
+  crossOriginResourcePolicy: { policy: "cross-origin" } // Allow cross-origin resource sharing
 }));
 
 // CORS configuration for ElevenLabs and MCP clients
@@ -75,6 +79,27 @@ app.use('/api/', limiter);
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Additional headers for ElevenLabs backend integration
+app.use((req, res, next) => {
+  // Log incoming requests for debugging
+  console.log(`📥 ${req.method} ${req.url} - Origin: ${req.get('origin')} - Referer: ${req.get('referer')}`);
+  
+  // Set additional CORS headers
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Last-Event-ID, mcp-session-id');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Referrer-Policy', 'no-referrer-when-downgrade');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  
+  next();
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
