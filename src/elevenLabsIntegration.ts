@@ -53,6 +53,11 @@ export interface ElevenLabsResponse {
   };
 }
 
+// ElevenLabs ClientTools configuration type
+export interface ElevenLabsClientToolsConfig {
+  clientTools: Record<string, (parameters: any) => Promise<string | number | void> | string | number | void>;
+}
+
 export class ElevenLabsHandler {
   private contexts = new Map<string, Context>();
   private config: FullConfig;
@@ -61,6 +66,105 @@ export class ElevenLabsHandler {
   constructor(config: FullConfig) {
     this.config = config;
     this.tools = config.vision ? visionTools : snapshotTools;
+  }
+
+  /**
+   * Get ElevenLabs clientTools configuration for tool registration
+   * This method creates tool handlers that ElevenLabs can use directly
+   */
+  getClientToolsConfig(): ElevenLabsClientToolsConfig {
+    const clientTools: Record<string, (parameters: any) => Promise<string | number | void> | string | number | void> = {};
+
+    // Register each tool as a client tool handler
+    this.tools.forEach(tool => {
+      clientTools[tool.schema.name] = async (parameters: any) => {
+        try {
+          console.log(`🛠️ ElevenLabs executing tool: ${tool.schema.name}`, parameters);
+          
+          // Create a default context for tool execution
+          const context = await this.createContext();
+          
+          // Execute the tool
+          const result = await context.run(tool, parameters);
+          
+                     // Return the result as a string
+           if (result.content && result.content.length > 0) {
+             const textContent = result.content.find(content => content.type === 'text');
+             if (textContent) {
+               return textContent.text as string;
+             }
+           }
+           
+           return `Tool ${tool.schema.name} executed successfully`;
+        } catch (error) {
+          console.error(`❌ Error executing tool ${tool.schema.name}:`, error);
+          throw new Error(`Failed to execute ${tool.schema.name}: ${error}`);
+        }
+      };
+    });
+
+    return { clientTools };
+  }
+
+  /**
+   * Get tool definitions in ElevenLabs format
+   * This provides the tool metadata that ElevenLabs needs for registration
+   */
+  getToolDefinitions() {
+    return this.tools.map(tool => ({
+      name: tool.schema.name,
+      description: tool.schema.description,
+      parameters: {
+        type: "object",
+        properties: this.getToolProperties(tool),
+        required: this.getToolRequired(tool)
+      }
+    }));
+  }
+
+  private getToolProperties(tool: any) {
+    try {
+      // Convert Zod schema to JSON Schema properties
+      const schema = tool.schema.inputSchema;
+      if (schema && schema.shape) {
+        const properties: Record<string, any> = {};
+        Object.keys(schema.shape).forEach(key => {
+          const field = schema.shape[key];
+          properties[key] = {
+            type: this.getZodType(field),
+            description: field.description || `${key} parameter`
+          };
+        });
+        return properties;
+      }
+    } catch (error) {
+      console.warn(`⚠️ Could not extract properties for tool ${tool.schema.name}:`, error);
+    }
+    return {};
+  }
+
+  private getToolRequired(tool: any) {
+    try {
+      const schema = tool.schema.inputSchema;
+      if (schema && schema.shape) {
+        return Object.keys(schema.shape).filter(key => {
+          const field = schema.shape[key];
+          return !field.isOptional && !field._def.defaultValue;
+        });
+      }
+    } catch (error) {
+      console.warn(`⚠️ Could not extract required fields for tool ${tool.schema.name}:`, error);
+    }
+    return [];
+  }
+
+  private getZodType(zodField: any): string {
+    if (zodField._def.typeName === 'ZodString') return 'string';
+    if (zodField._def.typeName === 'ZodNumber') return 'number';
+    if (zodField._def.typeName === 'ZodBoolean') return 'boolean';
+    if (zodField._def.typeName === 'ZodArray') return 'array';
+    if (zodField._def.typeName === 'ZodObject') return 'object';
+    return 'string'; // default
   }
 
   async handleRequest(request: ElevenLabsRequest): Promise<ElevenLabsResponse> {

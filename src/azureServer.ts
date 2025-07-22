@@ -365,6 +365,40 @@ app.post('/api/browser-action', async (req, res) => {
   }
 });
 
+// ElevenLabs ClientTools configuration endpoint
+app.get('/api/elevenlabs-tools', async (req, res) => {
+  try {
+    console.log('🛠️ ElevenLabs requesting clientTools configuration');
+    
+    if (!elevenLabsHandler) {
+      return res.status(503).json({
+        error: 'ElevenLabs handler not initialized',
+        message: 'Server is starting up, please try again'
+      });
+    }
+    
+    const clientToolsConfig = elevenLabsHandler.getClientToolsConfig();
+    const toolDefinitions = elevenLabsHandler.getToolDefinitions();
+    
+    console.log(`✅ Returning ${Object.keys(clientToolsConfig.clientTools).length} clientTools to ElevenLabs`);
+    
+    res.json({
+      success: true,
+      clientTools: clientToolsConfig.clientTools,
+      toolDefinitions: toolDefinitions,
+      message: 'Use these clientTools in your ElevenLabs Conversation.startSession() configuration'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error serving ElevenLabs clientTools:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve clientTools configuration',
+      message: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+});
+
 // MCP Protocol endpoint (for direct MCP clients)
 app.post('/api/mcp', async (req, res) => {
   try {
