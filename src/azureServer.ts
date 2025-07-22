@@ -407,29 +407,109 @@ app.post('/api/elevenlabs-tools', async (req, res) => {
     
     if (!elevenLabsHandler) {
       return res.status(503).json({
-        error: 'ElevenLabs handler not initialized',
-        message: 'Server is starting up, please try again'
+        jsonrpc: '2.0',
+        id: req.body.id,
+        error: {
+          code: -32603,
+          message: 'ElevenLabs handler not initialized'
+        }
       });
     }
     
-    const clientToolsConfig = elevenLabsHandler.getClientToolsConfig();
-    const toolDefinitions = elevenLabsHandler.getToolDefinitions();
+    // Handle MCP protocol messages
+    const { method, params, id } = req.body;
     
-    console.log(`✅ Returning ${Object.keys(clientToolsConfig.clientTools).length} clientTools to ElevenLabs`);
-    
-    res.json({
-      success: true,
-      clientTools: clientToolsConfig.clientTools,
-      toolDefinitions: toolDefinitions,
-      message: 'Use these clientTools in your ElevenLabs Conversation.startSession() configuration'
-    });
+    switch (method) {
+      case 'initialize':
+        console.log('🔧 ElevenLabs MCP client initializing...');
+        res.json({
+          jsonrpc: '2.0',
+          id: id,
+          result: {
+            protocolVersion: '2025-03-26',
+            capabilities: {
+              tools: {}
+            },
+            serverInfo: {
+              name: 'Playwright MCP Server',
+              version: '1.0.0'
+            }
+          }
+        });
+        break;
+        
+      case 'tools/list':
+        console.log('📋 ElevenLabs requesting tools list...');
+        const mcpToolDefinitions = elevenLabsHandler.getToolDefinitions();
+        res.json({
+          jsonrpc: '2.0',
+          id: id,
+          result: {
+            tools: mcpToolDefinitions
+          }
+        });
+        break;
+        
+      case 'tools/call':
+        console.log(`🛠️ ElevenLabs calling tool: ${params.name}`, params.arguments);
+        try {
+          const clientToolsConfig = elevenLabsHandler.getClientToolsConfig();
+          const toolFunction = clientToolsConfig.clientTools[params.name];
+          
+          if (!toolFunction) {
+            throw new Error(`Tool ${params.name} not found`);
+          }
+          
+          const result = await toolFunction(params.arguments || {});
+          
+          res.json({
+            jsonrpc: '2.0',
+            id: id,
+            result: {
+              content: [
+                {
+                  type: 'text',
+                  text: typeof result === 'string' ? result : JSON.stringify(result)
+                }
+              ]
+            }
+          });
+        } catch (error) {
+          res.json({
+            jsonrpc: '2.0',
+            id: id,
+            error: {
+              code: -32603,
+              message: error instanceof Error ? error.message : 'Tool execution failed'
+            }
+          });
+        }
+        break;
+        
+      default:
+        // Fallback to clientTools configuration for non-MCP requests
+        const fallbackClientToolsConfig = elevenLabsHandler.getClientToolsConfig();
+        const fallbackToolDefinitions = elevenLabsHandler.getToolDefinitions();
+        
+        console.log(`✅ Returning ${Object.keys(fallbackClientToolsConfig.clientTools).length} clientTools to ElevenLabs`);
+        
+        res.json({
+          success: true,
+          clientTools: fallbackClientToolsConfig.clientTools,
+          toolDefinitions: fallbackToolDefinitions,
+          message: 'Use these clientTools in your ElevenLabs Conversation.startSession() configuration'
+        });
+    }
     
   } catch (error) {
     console.error('❌ Error serving ElevenLabs clientTools:', error);
     res.status(500).json({
-      success: false,
-      error: 'Failed to retrieve clientTools configuration',
-      message: error instanceof Error ? error.message : 'Internal server error'
+      jsonrpc: '2.0',
+      id: req.body.id,
+      error: {
+        code: -32603,
+        message: 'Failed to retrieve clientTools configuration'
+      }
     });
   }
 });
