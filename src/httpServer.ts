@@ -129,7 +129,7 @@ export class HttpServer {
   _serveFile(response: ServerResponse, absoluteFilePath: string) {
     const content = fs.readFileSync(absoluteFilePath);
     response.statusCode = 200;
-    const contentType = mime.getType(path.extname(absoluteFilePath)) || 'application/octet-stream';
+    const contentType = mime.lookup(path.extname(absoluteFilePath)) || 'application/octet-stream';
     response.setHeader('Content-Type', contentType);
     response.setHeader('Content-Length', content.byteLength);
     response.end(content);
@@ -176,7 +176,7 @@ export class HttpServer {
       'Content-Range': `bytes ${start}-${end}/${size}`,
       'Accept-Ranges': 'bytes',
       'Content-Length': end - start + 1,
-      'Content-Type': mime.getType(path.extname(absoluteFilePath))!,
+      'Content-Type': mime.lookup(path.extname(absoluteFilePath))!,
     });
 
     const readable = fs.createReadStream(absoluteFilePath, { start, end });
