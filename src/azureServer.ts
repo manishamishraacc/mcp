@@ -21,17 +21,45 @@ app.use(helmet({
   contentSecurityPolicy: false // Disable for browser automation
 }));
 
-// CORS configuration for ElevenLabs
+// CORS configuration for ElevenLabs and MCP clients
 app.use(cors({
-  origin: [
-    'https://api.elevenlabs.io',
-    'https://*.elevenlabs.io',
-    'https://elevenlabs.io',
-    process.env.ALLOWED_ORIGINS?.split(',') || []
-  ].flat().filter(Boolean),
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Allow ElevenLabs domains
+    if (origin.includes('elevenlabs.io') || 
+        origin.includes('elevenlabs.com') ||
+        origin === 'https://api.elevenlabs.io' ||
+        origin === 'https://elevenlabs.io') {
+      return callback(null, true);
+    }
+    
+    // Allow localhost for development
+    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      return callback(null, true);
+    }
+    
+    // Allow custom origins from environment
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // For SSE/MCP connections, be more permissive
+    return callback(null, true);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Cache-Control',
+    'Last-Event-ID',
+    'mcp-session-id'
+  ]
 }));
 
 // Rate limiting
