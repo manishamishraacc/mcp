@@ -124,7 +124,28 @@ app.get('/tools', async (req, res) => {
       });
     }
     
-    const toolsResult = await mcpServer.listTools();
+    console.log('🔍 MCP Server status:', !!mcpServer);
+    console.log('🔍 MCP Server type:', typeof mcpServer);
+    
+    let toolsResult;
+    try {
+      toolsResult = await mcpServer.listTools();
+      console.log('🔍 Raw tools result:', toolsResult);
+    } catch (error) {
+      console.error('❌ Error getting tools from MCP server:', error);
+      return res.status(500).json({
+        error: 'Failed to get tools from MCP server',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+    
+    if (!toolsResult || !toolsResult.tools || !Array.isArray(toolsResult.tools)) {
+      console.error('❌ Invalid tools result structure:', toolsResult);
+      return res.status(500).json({
+        error: 'Invalid tools result',
+        message: 'MCP server returned invalid tools structure'
+      });
+    }
     
     // Format tools exactly as ElevenLabs expects - simple array format
     const formattedTools = toolsResult.tools.map(tool => {
@@ -226,7 +247,23 @@ async function initializeServices() {
       sandbox: false
     });
 
+    console.log('🔧 Creating MCP Server with config:', {
+      browser: config.browser,
+      capabilities: config.capabilities,
+      vision: config.vision
+    });
+    
     mcpServer = new Server(config);
+    
+    // Test if tools are loaded immediately after creation
+    try {
+      const testTools = await mcpServer.listTools();
+      console.log(`🛠️ MCP Server loaded with ${testTools.tools.length} tools`);
+      console.log('📋 Tool names:', testTools.tools.map(t => t.name).slice(0, 5));
+    } catch (error) {
+      console.error('❌ Error testing MCP server tools:', error);
+    }
+    
     elevenLabsHandler = new ElevenLabsHandler(config);
     
     console.log('✅ Services initialized successfully');
