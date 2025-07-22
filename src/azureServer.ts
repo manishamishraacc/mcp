@@ -213,12 +213,21 @@ app.get('/tools', async (req, res) => {
       if (origin?.includes('elevenlabs.io') || referer?.includes('elevenlabs.io') || userAgent?.includes('python-httpx')) {
         console.log('🔧 ElevenLabs requesting tools - returning wrapped format');
         
-        // Return tools in the exact format ElevenLabs expects
-        res.json({
+        const response = {
           tools: formattedTools
-        });
+        };
+        
+        console.log('📤 /tools Response being sent to ElevenLabs:');
+        console.log(JSON.stringify(response, null, 2));
+        
+        // Return tools in the exact format ElevenLabs expects
+        res.json(response);
       } else {
         console.log('📄 Browser request - sending tools as JSON array');
+        
+        console.log('📤 /tools Response being sent to browser:');
+        console.log(JSON.stringify(formattedTools, null, 2));
+        
         // IMPORTANT: Return a raw array (not wrapped in an object) for browser
         res.json(formattedTools);
       }
@@ -252,12 +261,17 @@ app.post('/tools/:toolName', async (req, res) => {
     
     console.log(`✅ Tool ${toolName} executed successfully`);
     
-    res.json({
+    const response = {
       success: true,
       tool: toolName,
       result: result,
       timestamp: new Date().toISOString()
-    });
+    };
+    
+    console.log('📤 Tool execution response being sent:');
+    console.log(JSON.stringify(response, null, 2));
+    
+    res.json(response);
     
   } catch (error) {
     console.error(`❌ Error executing tool ${req.params.toolName}:`, error);
@@ -641,10 +655,15 @@ async function handleSSE(req: express.Request, res: express.Response, url: URL) 
 
         console.log(`✅ Returning ${formattedTools.length} tools via /mcp`);
         
-        // Return tools in the exact format ElevenLabs expects
-        res.json({
+        const response = {
           tools: formattedTools
-        });
+        };
+        
+        console.log('📤 /mcp Response being sent to ElevenLabs:');
+        console.log(JSON.stringify(response, null, 2));
+        
+        // Return tools in the exact format ElevenLabs expects
+        res.json(response);
         return;
       }
       
