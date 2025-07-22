@@ -14,10 +14,15 @@ import { contextFactory } from './browserContextFactory.js';
 import { snapshotTools } from './tools.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 const app = express();
 const port = parseInt(process.env.PORT || '3000', 10);
-
+interface JSONSchemaObject {
+  type: string;
+  properties?: Record<string, any>;
+  required?: string[];
+}
 // Security middleware - configured for ElevenLabs integration
 app.use(helmet({
   contentSecurityPolicy: false, // Disable for browser automation
@@ -600,111 +605,119 @@ async function handleSSE(req: express.Request, res: express.Response, url: URL) 
       console.log('🔌 New MCP StreamableHTTP request');
       console.log('📊 Request method:', req.method);
       console.log('📊 Request headers:', JSON.stringify(req.headers, null, 2));
-      
-      // Handle GET and POST requests for tool listing (ElevenLabs compatibility)
-      if (req.method === 'GET' || req.method === 'POST') {
-        console.log(`🛠️ ElevenLabs requesting tools via ${req.method} /mcp`);
-        
-        // Log request body for POST requests
-        if (req.method === 'POST') {
-          console.log('📊 Request body:', JSON.stringify(req.body, null, 2));
-        }
-        
-        if (!mcpServer) {
-          return res.status(503).json({
-            error: 'MCP Server not initialized',
-            message: 'Server is starting up, please try again'
-          });
-        }
-        
-        const toolsResult = await mcpServer.listTools();
-
-        if (!toolsResult || !toolsResult.tools || !Array.isArray(toolsResult.tools)) {
-          console.error('❌ Invalid tools result structure:', toolsResult);
-          return res.status(500).json({
-            error: 'Invalid tools result',
-            message: 'MCP server returned invalid tools structure'
-          });
-        }
-        
-        // Format tools exactly as ElevenLabs expects
-        const formattedTools = toolsResult.tools.map(tool => {
-          let parameters = {
-            type: "object",
-            properties: {},
-            required: []
-          };
-          
-          try {
-            // Convert tool inputSchema to JSON Schema format
-            if (tool.inputSchema && typeof tool.inputSchema === 'object') {
-              const schema = tool.inputSchema as any;
-              if (schema.properties) {
-                parameters = {
-                  type: "object",
-                  properties: schema.properties,
-                  required: schema.required || []
-                };
-              }
-            }
-          } catch (e) {
-            console.warn(`⚠️ Schema conversion failed for tool ${tool.name}:`, e);
+  
+      if (req.method === 'POST') {
+        const body = req.body;
+        console.log('📊 Request body:', JSON.stringify(body, null, 2));
+  
+        // Handle tool list request from ElevenLabs
+        if (body?.method === 'initialize') {
+          if (!mcpServer) {
+            return res.status(503).json({
+              error: 'MCP Server not initialized',
+              message: 'Server is starting up, please try again',
+            });
           }
-          
-          return {
-            name: tool.name,
-            description: tool.description,
-            parameters: parameters
+  
+          const toolsResult = await mcpServer.listTools();
+  
+          if (!toolsResult || !Array.isArray(toolsResult.tools)) {
+            console.error('❌ Invalid tools result structure:', toolsResult);
+            return res.status(500).json({
+              error: 'Invalid tools result',
+              message: 'MCP server returned invalid tools structure',
+            });
+          }
+  
+          const formattedTools = toolsResult.tools.map((tool) => {
+            let parameters: JSONSchemaObject = {
+              type: 'object',
+              properties: {},
+              required: [],
+            };
+  
+            try {
+              if (tool.inputSchema) {
+                const schema = zodToJsonSchema(tool.inputSchema, tool.name);
+  
+                if (
+                  schema &&
+                  typeof schema === 'object' &&
+                  'type' in schema &&
+                  schema.type === 'object' &&
+                  'properties' in schema
+                ) {
+                  parameters = {
+                    type: 'object',
+                    properties: schema.properties,
+                    required: Array.isArray(schema.required) ? schema.required : []
+                  };
+                }
+              }
+            } catch (e) {
+              console.warn(`⚠️ Failed to convert Zod schema for tool ${tool.name}:`, e);
+            }
+  
+            return {
+              name: tool.name,
+              description: tool.description,
+              parameters,
+            };
+          });
+  
+          const response = {
+            jsonrpc: '2.0',
+            id: body.id ?? 0,
+            result: {
+              tools: formattedTools,
+            },
           };
-        });
-
-        console.log(`✅ Returning ${formattedTools.length} tools via /mcp`);
-        
-        const response = {
-          tools: formattedTools
-        };
-        
-        console.log('📤 /mcp Response being sent to ElevenLabs:');
-        console.log(JSON.stringify(response, null, 2));
-        
-        // Return tools in the exact format ElevenLabs expects
-        res.json(response);
-        return;
+  
+          console.log(`✅ Returning ${formattedTools.length} tools via /mcp`);
+          console.log('📤 Response:', JSON.stringify(response, null, 2));
+  
+          res.setHeader('Content-Type', 'application/json');
+          return res.status(200).json(response);
+        }
       }
-      
+  
+      // Handle StreamableHTTP sessions (voice interaction)
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
       if (sessionId) {
         const transport = streamableSessions.get(sessionId);
         if (!transport) {
-          res.statusCode = 404;
-          return res.end('Session not found');
+          res.status(404).end('Session not found');
+          return;
         }
         return await transport.handleRequest(req, res);
       }
-
+  
       if (req.method === 'POST') {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => crypto.randomUUID(),
-          onsessioninitialized: sessionId => {
-            streamableSessions.set(sessionId, transport);
-          }
+          onsessioninitialized: (id) => {
+            streamableSessions.set(id, transport);
+          },
         });
+  
         transport.onclose = () => {
-          if (transport.sessionId)
+          if (transport.sessionId) {
             streamableSessions.delete(transport.sessionId);
+          }
         };
+  
         await mcpServer.createConnection(transport);
-        await transport.handleRequest(req, res);
-        return;
+        return await transport.handleRequest(req, res);
       }
-
-      res.statusCode = 400;
-      res.end('Invalid request');
+  
+      res.status(400).end('Invalid request');
     } catch (error) {
-      console.error('❌ Error handling MCP request:', error);
+      console.error('❌ Error in /mcp handler:', error);
       res.status(500).end('MCP request failed');
     }
   });
+  
+  
 
 // Session management
 app.delete('/api/session/:sessionId', async (req, res) => {
