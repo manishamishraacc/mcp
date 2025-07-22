@@ -168,8 +168,29 @@ app.get('/tools', async (req, res) => {
 
     console.log(`✅ Returning ${formattedTools.length} tools to ElevenLabs`);
     
-    // IMPORTANT: Return a raw array (not wrapped in an object)
-    res.json(formattedTools);
+    // Check if ElevenLabs expects Server-Sent Events format
+    const acceptHeader = req.get('Accept');
+    if (acceptHeader && acceptHeader.includes('text/event-stream')) {
+      console.log('📡 ElevenLabs expects SSE format - sending as Server-Sent Events');
+      
+      // Set SSE headers
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control'
+      });
+      
+      // Send tools as SSE format
+      res.write(`event: tools\n`);
+      res.write(`data: ${JSON.stringify(formattedTools)}\n\n`);
+      res.end();
+    } else {
+      console.log('📄 Browser request - sending as JSON');
+      // IMPORTANT: Return a raw array (not wrapped in an object) for browser
+      res.json(formattedTools);
+    }
     
   } catch (error) {
     console.error('❌ Error serving tools:', error);
