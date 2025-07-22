@@ -6,12 +6,14 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import crypto from 'crypto';
 import { Server } from './server.js';
 import { resolveCLIConfig } from './config.js';
 import { ElevenLabsHandler } from './elevenLabsIntegration.js';
 import { contextFactory } from './browserContextFactory.js';
 import { snapshotTools } from './tools.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 const app = express();
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -176,7 +178,7 @@ app.get('/tools', async (req, res) => {
       try {
         // Create SSE transport for proper MCP protocol
         const transport = new SSEServerTransport('/tools', res);
-        sessions.set(transport.sessionId, transport);
+        sseSessions.set(transport.sessionId, transport);
         
         console.log(`📡 Created SSE session for tools: ${transport.sessionId}`);
         
@@ -186,7 +188,7 @@ app.get('/tools', async (req, res) => {
         // Handle connection cleanup
         res.on('close', () => {
           console.log(`🔌 Tools SSE session closed: ${transport.sessionId}`);
-          sessions.delete(transport.sessionId);
+          sseSessions.delete(transport.sessionId);
           void connection.close().catch(e => console.error('Error closing tools connection:', e));
         });
         
@@ -207,15 +209,15 @@ app.get('/tools', async (req, res) => {
             {
               id: "playwright-mcp-server",
               config: {
-                url: `https://${req.get('host')}/sse`,
-                name: "Playwright MCP Server",
+                url: `https://${req.get('host')}/mcp`,
+                name: "Playwright MCP Server", 
                 approval_policy: "auto_approve_all",
                 tool_approval_hashes: formattedTools.map(tool => ({
                   tool_name: tool.name,
                   tool_hash: Buffer.from(tool.name).toString('base64'),
                   approval_policy: "auto_approved"
                 })),
-                transport: "SSE",
+                transport: "HTTP",
                 request_headers: {},
                 description: "Playwright browser automation MCP server with 17 tools for web interaction"
               },
@@ -399,8 +401,9 @@ app.post('/api/mcp', async (req, res) => {
   }
 });
 
-// MCP SSE endpoint for ElevenLabs integration  
-const sessions = new Map();
+// MCP endpoints for ElevenLabs integration  
+const sseSessions = new Map();
+const streamableSessions = new Map();
 
 async function handleSSE(req: express.Request, res: express.Response, url: URL) {
   if (req.method === 'POST') {
@@ -410,7 +413,7 @@ async function handleSSE(req: express.Request, res: express.Response, url: URL) 
       return res.end('Missing sessionId');
     }
 
-    const transport = sessions.get(sessionId);
+    const transport = sseSessions.get(sessionId);
     if (!transport) {
       res.statusCode = 404;
       return res.end('Session not found');
@@ -421,33 +424,72 @@ async function handleSSE(req: express.Request, res: express.Response, url: URL) 
     console.log('🔌 New MCP SSE connection');
     
     const transport = new SSEServerTransport('/sse', res);
-    sessions.set(transport.sessionId, transport);
+    sseSessions.set(transport.sessionId, transport);
     
     console.log(`📡 Created SSE session: ${transport.sessionId}`);
     
     const connection = await mcpServer.createConnection(transport);
-    res.on('close', () => {
-      console.log(`🔌 SSE session closed: ${transport.sessionId}`);
-      sessions.delete(transport.sessionId);
-      void connection.close().catch(e => console.error('Error closing connection:', e));
-    });
-    return;
+          res.on('close', () => {
+        console.log(`🔌 SSE session closed: ${transport.sessionId}`);
+        sseSessions.delete(transport.sessionId);
+        void connection.close().catch(e => console.error('Error closing connection:', e));
+      });
+      return;
+    }
+
+    res.statusCode = 405;
+    res.end('Method not allowed');
   }
 
-  res.statusCode = 405;
-  res.end('Method not allowed');
-}
+  // Handle SSE requests
+  app.use('/sse', async (req, res) => {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      await handleSSE(req, res, url);
+    } catch (error) {
+      console.error('❌ Error handling SSE request:', error);
+      res.status(500).end('SSE request failed');
+    }
+  });
 
-// Handle SSE requests
-app.use('/sse', async (req, res) => {
-  try {
-    const url = new URL(req.url, `http://${req.headers.host}`);
-    await handleSSE(req, res, url);
-  } catch (error) {
-    console.error('❌ Error handling SSE request:', error);
-    res.status(500).end('SSE request failed');
-  }
-});
+  // MCP StreamableHTTP endpoint for ElevenLabs integration
+  app.use('/mcp', async (req, res) => {
+    try {
+      console.log('🔌 New MCP StreamableHTTP request');
+      
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      if (sessionId) {
+        const transport = streamableSessions.get(sessionId);
+        if (!transport) {
+          res.statusCode = 404;
+          return res.end('Session not found');
+        }
+        return await transport.handleRequest(req, res);
+      }
+
+      if (req.method === 'POST') {
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => crypto.randomUUID(),
+          onsessioninitialized: sessionId => {
+            streamableSessions.set(sessionId, transport);
+          }
+        });
+        transport.onclose = () => {
+          if (transport.sessionId)
+            streamableSessions.delete(transport.sessionId);
+        };
+        await mcpServer.createConnection(transport);
+        await transport.handleRequest(req, res);
+        return;
+      }
+
+      res.statusCode = 400;
+      res.end('Invalid request');
+    } catch (error) {
+      console.error('❌ Error handling MCP request:', error);
+      res.status(500).end('MCP request failed');
+    }
+  });
 
 // Session management
 app.delete('/api/session/:sessionId', async (req, res) => {
