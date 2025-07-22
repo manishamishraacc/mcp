@@ -1,0 +1,267 @@
+/**
+ * Azure App Service entry point for Playwright MCP Server
+ */
+
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { Server } from './server.js';
+import { resolveCLIConfig } from './config.js';
+import { ElevenLabsHandler } from './elevenLabsIntegration.js';
+import { contextFactory } from './browserContextFactory.js';
+import { snapshotTools } from './tools.js';
+
+const app = express();
+const port = parseInt(process.env.PORT || '3000', 10);
+
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: false // Disable for browser automation
+}));
+
+// CORS configuration for ElevenLabs
+app.use(cors({
+  origin: [
+    'https://api.elevenlabs.io',
+    'https://*.elevenlabs.io',
+    'https://elevenlabs.io',
+    process.env.ALLOWED_ORIGINS?.split(',') || []
+  ].flat().filter(Boolean),
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/', limiter);
+
+// Body parsing
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version || '1.0.0'
+  });
+});
+
+// Initialize MCP Server and ElevenLabs handler
+let mcpServer: Server;
+let elevenLabsHandler: ElevenLabsHandler;
+
+async function initializeServices() {
+  try {
+    // Configure for Azure App Service
+    const config = await resolveCLIConfig({
+      browser: 'chromium',
+      headless: true,
+      isolated: true,
+      blockServiceWorkers: true,
+      caps: 'core,tabs,wait,vision',
+      imageResponses: 'allow',
+      vision: true,
+      sandbox: false
+    });
+
+    mcpServer = new Server(config);
+    elevenLabsHandler = new ElevenLabsHandler(config);
+    
+    console.log('✅ Services initialized successfully');
+  } catch (error) {
+    console.error('❌ Failed to initialize services:', error);
+    throw error;
+  }
+}
+
+// ElevenLabs AI Agent endpoint
+app.post('/api/browser-action', async (req, res) => {
+  try {
+    const { action, parameters, sessionId } = req.body;
+    
+    if (!action) {
+      return res.status(400).json({
+        success: false,
+        error: 'Action is required'
+      });
+    }
+
+    console.log(`🤖 ElevenLabs request: ${action}`, parameters);
+    
+    const result = await elevenLabsHandler.handleRequest({
+      action,
+      parameters: parameters || {},
+      sessionId: sessionId || req.ip
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Error handling ElevenLabs request:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// MCP Protocol endpoint (for direct MCP clients)
+app.post('/api/mcp', async (req, res) => {
+  try {
+    const { method, params } = req.body;
+    
+    // Handle MCP protocol messages
+    let result;
+    switch (method) {
+      case 'tools/list':
+        result = await mcpServer.listTools();
+        break;
+      case 'tools/call':
+        result = await mcpServer.callTool(params.name, params.arguments);
+        break;
+      default:
+        throw new Error(`Unknown MCP method: ${method}`);
+    }
+
+    res.json({
+      jsonrpc: '2.0',
+      id: req.body.id,
+      result
+    });
+  } catch (error) {
+    console.error('❌ Error handling MCP request:', error);
+    res.json({
+      jsonrpc: '2.0',
+      id: req.body.id,
+      error: {
+        code: -32603,
+        message: error instanceof Error ? error.message : 'Internal error'
+      }
+    });
+  }
+});
+
+// Session management
+app.delete('/api/session/:sessionId', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    await elevenLabsHandler.closeSession(sessionId);
+    res.json({ success: true, message: 'Session closed' });
+  } catch (error) {
+    console.error('❌ Error closing session:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to close session'
+    });
+  }
+});
+
+// Get available actions for ElevenLabs
+app.get('/api/actions', (req, res) => {
+  res.json({
+    actions: [
+      {
+        name: 'navigate',
+        description: 'Navigate to a URL',
+        parameters: {
+          url: { type: 'string', required: true, description: 'URL to navigate to' }
+        }
+      },
+      {
+        name: 'click',
+        description: 'Click an element on the page',
+        parameters: {
+          element: { type: 'string', required: true, description: 'Element description' },
+          ref: { type: 'string', required: false, description: 'Element reference' }
+        }
+      },
+      {
+        name: 'type',
+        description: 'Type text into an input field',
+        parameters: {
+          text: { type: 'string', required: true, description: 'Text to type' },
+          element: { type: 'string', required: false, description: 'Input field description' }
+        }
+      },
+      {
+        name: 'screenshot',
+        description: 'Take a screenshot of the current page',
+        parameters: {}
+      },
+      {
+        name: 'extract_text',
+        description: 'Extract text content from the page',
+        parameters: {}
+      },
+      {
+        name: 'wait',
+        description: 'Wait for text to appear or time to pass',
+        parameters: {
+          text: { type: 'string', required: false, description: 'Text to wait for' },
+          time: { type: 'number', required: false, description: 'Time to wait in seconds' }
+        }
+      }
+    ]
+  });
+});
+
+// Error handling middleware
+app.use((error: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('❌ Unhandled error:', error);
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error'
+  });
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Endpoint not found'
+  });
+});
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('🔄 SIGTERM received, shutting down gracefully...');
+  await elevenLabsHandler.cleanup();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('🔄 SIGINT received, shutting down gracefully...');
+  await elevenLabsHandler.cleanup();
+  process.exit(0);
+});
+
+// Start server
+async function startServer() {
+  try {
+    await initializeServices();
+    
+    app.listen(port, '0.0.0.0', () => {
+      console.log(`🚀 Playwright MCP Server running on port ${port}`);
+      console.log(`📍 Health check: http://localhost:${port}/health`);
+      console.log(`🤖 ElevenLabs endpoint: http://localhost:${port}/api/browser-action`);
+      console.log(`🔧 MCP endpoint: http://localhost:${port}/api/mcp`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+// Start the server
+startServer();
+
+export { app };

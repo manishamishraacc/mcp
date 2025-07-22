@@ -56,7 +56,7 @@ async function handleSSE(server: Server, req: http.IncomingMessage, res: http.Se
       testDebug(`delete SSE session: ${transport.sessionId}`);
       sessions.delete(transport.sessionId);
       // eslint-disable-next-line no-console
-      void connection.close().catch(e => console.error(e));
+      void connection.close().catch((e: any) => console.error(e));
     });
     return;
   }

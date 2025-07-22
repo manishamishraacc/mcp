@@ -14,17 +14,18 @@
  * limitations under the License.
  */
 
+// @ts-ignore: Node.js built-in modules
 import fs from 'fs';
+// @ts-ignore: Node.js built-in modules
 import path from 'path';
-import http from 'http';
+import * as https from 'https';
+// @ts-ignore: Node.js built-in modules
 import net from 'net';
-
 import mime from 'mime';
-
 import { ManualPromise } from './manualPromise.js';
+import type { IncomingMessage, ServerResponse } from 'http';
 
-
-export type ServerRouteHandler = (request: http.IncomingMessage, response: http.ServerResponse) => void;
+export type ServerRouteHandler = (request: IncomingMessage, response: ServerResponse) => void;
 
 export type Transport = {
   sendEvent?: (method: string, params: any) => void;
@@ -35,15 +36,14 @@ export type Transport = {
 };
 
 export class HttpServer {
-  private _server: http.Server;
+  private _server: https.Server;
   private _urlPrefixPrecise: string = '';
   private _urlPrefixHumanReadable: string = '';
   private _port: number = 0;
   private _routes: { prefix?: string, exact?: string, handler: ServerRouteHandler }[] = [];
 
   constructor() {
-    this._server = http.createServer(this._onRequest.bind(this));
-    decorateServer(this._server);
+    this._server = https.createServer(this._onRequest.bind(this));
   }
 
   server() {
@@ -112,7 +112,7 @@ export class HttpServer {
     return purpose === 'human-readable' ? this._urlPrefixHumanReadable : this._urlPrefixPrecise;
   }
 
-  serveFile(request: http.IncomingMessage, response: http.ServerResponse, absoluteFilePath: string, headers?: { [name: string]: string }): boolean {
+  serveFile(request: IncomingMessage, response: ServerResponse, absoluteFilePath: string, headers?: { [name: string]: string }): boolean {
     try {
       for (const [name, value] of Object.entries(headers || {}))
         response.setHeader(name, value);
@@ -126,7 +126,7 @@ export class HttpServer {
     }
   }
 
-  _serveFile(response: http.ServerResponse, absoluteFilePath: string) {
+  _serveFile(response: ServerResponse, absoluteFilePath: string) {
     const content = fs.readFileSync(absoluteFilePath);
     response.statusCode = 200;
     const contentType = mime.getType(path.extname(absoluteFilePath)) || 'application/octet-stream';
@@ -135,7 +135,7 @@ export class HttpServer {
     response.end(content);
   }
 
-  _serveRangeFile(request: http.IncomingMessage, response: http.ServerResponse, absoluteFilePath: string) {
+  _serveRangeFile(request: IncomingMessage, response: ServerResponse, absoluteFilePath: string) {
     const range = request.headers.range;
     if (!range || !range.startsWith('bytes=') || range.includes(', ') || [...range].filter(char => char === '-').length !== 1) {
       response.statusCode = 400;
@@ -183,7 +183,7 @@ export class HttpServer {
     readable.pipe(response);
   }
 
-  private _onRequest(request: http.IncomingMessage, response: http.ServerResponse) {
+  private _onRequest(request: IncomingMessage, response: ServerResponse) {
     if (request.method === 'OPTIONS') {
       response.writeHead(200);
       response.end();
@@ -217,7 +217,7 @@ export class HttpServer {
 
 function decorateServer(server: net.Server) {
   const sockets = new Set<net.Socket>();
-  server.on('connection', socket => {
+  server.on('connection', (socket: net.Socket) => {
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
   });

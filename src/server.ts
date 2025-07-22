@@ -1,51 +1,65 @@
 /**
- * Copyright (c) Microsoft Corporation.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Simplified Server class for Azure deployment
  */
 
-import { createConnection } from './connection.js';
-import { contextFactory } from './browserContextFactory.js';
-
 import type { FullConfig } from './config.js';
-import type { Connection } from './connection.js';
+import { Context } from './context.js';
+import { contextFactory } from './browserContextFactory.js';
+import { snapshotTools, visionTools } from './tools.js';
+import type { Tool } from './tools/tool.js';
+import { createConnection } from './connection.js';
+import type { Connection } from '../index.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { BrowserContextFactory } from './browserContextFactory.js';
 
 export class Server {
-  readonly config: FullConfig;
+  private config: FullConfig;
+  private context: Context | undefined;
+  private tools: Tool[];
   private _connectionList: Connection[] = [];
-  private _browserConfig: FullConfig['browser'];
-  private _contextFactory: BrowserContextFactory;
 
   constructor(config: FullConfig) {
     this.config = config;
-    this._browserConfig = config.browser;
-    this._contextFactory = contextFactory(this._browserConfig);
+    const allTools = config.vision ? visionTools : snapshotTools;
+    this.tools = allTools.filter(tool => !config.capabilities || tool.capability === 'core' || config.capabilities.includes(tool.capability));
+  }
+
+  async listTools() {
+    return {
+      tools: this.tools.map(tool => ({
+        name: tool.schema.name,
+        description: tool.schema.description,
+        inputSchema: tool.schema.inputSchema
+      }))
+    };
+  }
+
+  async callTool(name: string, args: any) {
+    const tool = this.tools.find(t => t.schema.name === name);
+    if (!tool) {
+      throw new Error(`Tool not found: ${name}`);
+    }
+
+    if (!this.context) {
+      const factory = contextFactory(this.config.browser);
+      const { browserContext } = await factory.createContext();
+      this.context = new Context(this.tools, this.config, factory);
+    }
+
+    return await tool.handle(this.context, args);
   }
 
   async createConnection(transport: Transport): Promise<Connection> {
-    const connection = createConnection(this.config, this._contextFactory);
-    this._connectionList.push(connection);
+    const factory = contextFactory(this.config.browser);
+    const connection = createConnection(this.config, factory);
     await connection.server.connect(transport);
+    this._connectionList.push(connection);
     return connection;
   }
 
   setupExitWatchdog() {
     let isExiting = false;
     const handleExit = async () => {
-      if (isExiting)
-        return;
+      if (isExiting) return;
       isExiting = true;
       setTimeout(() => process.exit(0), 15000);
       await Promise.all(this._connectionList.map(connection => connection.close()));

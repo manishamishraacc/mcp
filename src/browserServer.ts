@@ -21,10 +21,12 @@ import net from 'net';
 import { program } from 'commander';
 import playwright from 'playwright';
 
-import { HttpServer } from './httpServer.js';
+
 import { packageJSON } from './package.js';
 
 import type http from 'http';
+// @ts-ignore: No type definitions for compiled JS
+import { HttpServer } from '../lib/httpServer.js';
 
 export type LaunchBrowserRequest = {
   browserType: string;
@@ -57,10 +59,10 @@ class BrowserServer {
 
   async start(port: number) {
     await this._server.start({ port });
-    this._server.routePath('/json/list', (req, res) => {
+    this._server.routePath('/json/list', (req: http.IncomingMessage, res: http.ServerResponse) => {
       this._handleJsonList(res);
     });
-    this._server.routePath('/json/launch', async (req, res) => {
+    this._server.routePath('/json/launch', async (req: http.IncomingMessage, res: http.ServerResponse) => {
       void this._handleLaunchBrowser(req, res).catch(e => console.error(e));
     });
     this._setEntries([]);

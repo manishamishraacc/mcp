@@ -1,73 +1,37 @@
 {
-  "name": "@playwright/mcp",
-  "version": "0.0.30",
-  "description": "Playwright Tools for MCP",
+  "name": "playwright-mcp-azure",
+  "version": "1.0.0",
   "type": "module",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/microsoft/playwright-mcp.git"
-  },
-  "homepage": "https://playwright.dev",
-  "engines": {
-    "node": ">=18"
-  },
-  "author": {
-    "name": "Microsoft Corporation"
-  },
-  "license": "Apache-2.0",
+  "description": "Playwright MCP Server for Azure App Service with ElevenLabs integration",
+  "main": "lib/azureServer.js",
   "scripts": {
+    "start": "node lib/azureServer.js",
     "build": "tsc",
-    "lint": "npm run update-readme && eslint . && tsc --noEmit",
-    "update-readme": "node utils/update-readme.js",
-    "watch": "tsc --watch",
-    "test": "playwright test",
-    "ctest": "playwright test --project=chrome",
-    "ftest": "playwright test --project=firefox",
-    "wtest": "playwright test --project=webkit",
-    "run-server": "node lib/browserServer.js",
-    "clean": "rm -rf lib",
-    "npm-publish": "npm run clean && npm run build && npm run test && npm publish"
-  },
-  "exports": {
-    "./package.json": "./package.json",
-    ".": {
-      "types": "./index.d.ts",
-      "default": "./index.js"
-    }
+    "dev": "tsc && node lib/azureServer.js",
+    "postinstall": "playwright install --with-deps chromium",
+    "test": "npm run build && node lib/program.js --help"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.11.0",
-    "commander": "^13.1.0",
-    "debug": "^4.4.1",
-    "mime": "^4.0.7",
-    "playwright": "^1.54.1",
-    "playwright-core": "^1.54.1",
-    "ws": "^8.18.1",
-    "zod": "^3.25.76",
-    "zod-to-json-schema": "^3.24.4"
+    "playwright": "^1.40.0",
+    "playwright-core": "^1.40.0",
+    "commander": "^11.0.0",
+    "zod": "^3.22.0",
+    "debug": "^4.3.0",
+    "express": "^4.18.0",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "express-rate-limit": "^7.0.0"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.2.0",
-    "@eslint/js": "^9.19.0",
-    "@playwright/test": "1.54.1",
-    "@stylistic/eslint-plugin": "^3.0.1",
-    "@types/chrome": "^0.0.315",
-    "@types/cors": "^2.8.19",
-    "@types/debug": "^4.1.12",
-    "@types/express": "^5.0.3",
-    "@types/helmet": "^0.0.48",
-    "@types/node": "^22.16.5",
-    "@types/ws": "^8.18.1",
-    "@typescript-eslint/eslint-plugin": "^8.26.1",
-    "@typescript-eslint/parser": "^8.26.1",
-    "@typescript-eslint/utils": "^8.26.1",
-    "eslint": "^9.19.0",
-    "eslint-plugin-import": "^2.31.0",
-    "eslint-plugin-notice": "^1.0.0",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.8.3"
+    "@types/node": "^20.0.0",
+    "@types/express": "^4.17.0",
+    "@types/cors": "^2.8.0",
+    "typescript": "^5.0.0"
   },
-  "bin": {
-    "mcp-server-playwright": "cli.js"
-  }
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["playwright", "mcp", "azure", "elevenlabs", "browser-automation"],
+  "author": "Your Name",
+  "license": "Apache-2.0"
 }

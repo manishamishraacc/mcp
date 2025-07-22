@@ -53,23 +53,32 @@ program
     .option('--viewport-size <size>', 'specify browser viewport size in pixels, for example "1280, 720"')
     .option('--vision', 'Run server that uses screenshots (Aria snapshots are used by default)')
     .action(async options => {
-      const config = await resolveCLIConfig(options);
-      const httpServer = config.server.port !== undefined ? await startHttpServer(config.server) : undefined;
+      try {
+        const config = await resolveCLIConfig(options);
+        const httpServer = config.server.port !== undefined ? await startHttpServer(config.server) : undefined;
 
-      const server = new Server(config);
-      server.setupExitWatchdog();
+        const server = new Server(config);
+        server.setupExitWatchdog();
 
-      if (httpServer)
-        startHttpTransport(httpServer, server);
-      else
-        await startStdioTransport(server);
+        if (httpServer) {
+          startHttpTransport(httpServer, server);
+          // eslint-disable-next-line no-console
+          // @ts-expect-error: 'port' is not a standard property, but our server implementation provides it.
+          console.log(`MCP server running at https://${config.server.host || 'localhost'}:${httpServer['port']()}`);
+        } else {
+          await startStdioTransport(server);
+        }
 
-      if (config.saveTrace) {
-        const server = await startTraceViewerServer();
-        const urlPrefix = server.urlPrefix('human-readable');
-        const url = urlPrefix + '/trace/index.html?trace=' + config.browser.launchOptions.tracesDir + '/trace.json';
+        if (config.saveTrace) {
+          const server = await startTraceViewerServer();
+          const urlPrefix = server.urlPrefix('human-readable');
+          const url = urlPrefix + '/trace/index.html?trace=' + config.browser.launchOptions.tracesDir + '/trace.json';
+          // eslint-disable-next-line no-console
+          console.error('\nTrace viewer listening on ' + url);
+        }
+      } catch (err) {
         // eslint-disable-next-line no-console
-        console.error('\nTrace viewer listening on ' + url);
+        console.error('Failed to start MCP server:', err);
       }
     });
 
