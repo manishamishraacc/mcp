@@ -601,9 +601,14 @@ async function handleSSE(req: express.Request, res: express.Response, url: URL) 
       console.log('📊 Request method:', req.method);
       console.log('📊 Request headers:', JSON.stringify(req.headers, null, 2));
       
-      // Handle GET requests for tool listing (ElevenLabs compatibility)
-      if (req.method === 'GET') {
-        console.log('🛠️ ElevenLabs requesting tools via GET /mcp');
+      // Handle GET and POST requests for tool listing (ElevenLabs compatibility)
+      if (req.method === 'GET' || req.method === 'POST') {
+        console.log(`🛠️ ElevenLabs requesting tools via ${req.method} /mcp`);
+        
+        // Log request body for POST requests
+        if (req.method === 'POST') {
+          console.log('📊 Request body:', JSON.stringify(req.body, null, 2));
+        }
         
         if (!mcpServer) {
           return res.status(503).json({
