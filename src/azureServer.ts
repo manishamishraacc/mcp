@@ -110,6 +110,83 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Tools endpoint for ElevenLabs direct integration
+app.get('/tools', async (req, res) => {
+  try {
+    console.log('🛠️ ElevenLabs requesting tools via GET /tools');
+    
+    if (!mcpServer) {
+      return res.status(503).json({
+        error: 'MCP Server not initialized',
+        message: 'Server is starting up, please try again'
+      });
+    }
+    
+    const toolsResult = await mcpServer.listTools();
+    
+    // Format tools for ElevenLabs
+    const formattedTools = toolsResult.tools.map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema || {},
+      type: 'function'
+    }));
+    
+    console.log(`✅ Returning ${formattedTools.length} tools to ElevenLabs`);
+    
+    res.json({
+      tools: formattedTools,
+      count: formattedTools.length,
+      server: 'Playwright MCP Server',
+      version: '1.0.0'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error serving tools:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve tools',
+      message: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// Tool execution endpoint for ElevenLabs direct integration
+app.post('/tools/:toolName', async (req, res) => {
+  try {
+    const { toolName } = req.params;
+    const { arguments: toolArgs } = req.body;
+    
+    console.log(`🔧 ElevenLabs executing tool: ${toolName}`, toolArgs);
+    
+    if (!mcpServer) {
+      return res.status(503).json({
+        error: 'MCP Server not initialized',
+        message: 'Server is starting up, please try again'
+      });
+    }
+    
+    const result = await mcpServer.callTool(toolName, toolArgs || {});
+    
+    console.log(`✅ Tool ${toolName} executed successfully`);
+    
+    res.json({
+      success: true,
+      tool: toolName,
+      result: result,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error(`❌ Error executing tool ${req.params.toolName}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Tool execution failed',
+      message: error instanceof Error ? error.message : 'Internal server error',
+      tool: req.params.toolName
+    });
+  }
+});
+
 // Initialize MCP Server and ElevenLabs handler
 let mcpServer: Server;
 let elevenLabsHandler: ElevenLabsHandler;
