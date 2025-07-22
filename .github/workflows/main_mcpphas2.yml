@@ -58,4 +58,4 @@ jobs:
           app-name: 'MCPPhas2'
           slot-name: 'Production'
           package: .
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_4BAE7C664EFC4C338682ED93CE2F82F3 }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E29509E09FF94BFA8CC3089D194F84D4 }}
