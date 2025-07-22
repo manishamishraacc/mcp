@@ -126,37 +126,41 @@ app.get('/tools', async (req, res) => {
     
     const toolsResult = await mcpServer.listTools();
     
-    // Format tools for ElevenLabs - try multiple formats to see what works
+    // Format tools exactly as ElevenLabs expects - simple array format
     const formattedTools = toolsResult.tools.map(tool => {
+      let parameters = {
+        type: "object",
+        properties: {},
+        required: []
+      };
+      
+      try {
+        // Convert tool schema to JSON Schema format
+        if (tool.inputSchema && typeof tool.inputSchema === 'object') {
+          const schema = tool.inputSchema as any;
+          if (schema.properties) {
+            parameters = {
+              type: "object",
+              properties: schema.properties,
+              required: schema.required || []
+            };
+          }
+        }
+      } catch (e) {
+        console.warn(`⚠️ Schema conversion failed for tool ${tool.name}:`, e);
+      }
+      
       return {
-        id: tool.name,
         name: tool.name,
         description: tool.description,
-        // Try minimal parameters first
-        parameters: {},
-        enabled: true,
-        type: 'function'
+        parameters: parameters
       };
     });
     
     console.log(`✅ Returning ${formattedTools.length} tools to ElevenLabs`);
     
-    // Debug: Log first few tools for troubleshooting
-    if (formattedTools.length > 0) {
-      console.log('📋 Sample tools:', formattedTools.slice(0, 2).map(t => ({ name: t.name, description: t.description })));
-    } else {
-      console.log('⚠️ No tools found - check server initialization');
-    }
-    
-    // Format response to match ElevenLabs expected structure
-    const response = {
-      success: true,
-      tools: formattedTools,
-      count: formattedTools.length
-    };
-    
-    console.log('📤 Sending response to ElevenLabs:', JSON.stringify(response, null, 2));
-    res.json(response);
+    // Return simple array format as ElevenLabs expects
+    res.json(formattedTools);
     
   } catch (error) {
     console.error('❌ Error serving tools:', error);
