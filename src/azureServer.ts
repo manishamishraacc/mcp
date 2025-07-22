@@ -114,6 +114,8 @@ app.get('/health', (req, res) => {
 app.get('/tools', async (req, res) => {
   try {
     console.log('🛠️ ElevenLabs requesting tools via GET /tools');
+    console.log('📊 Request headers:', JSON.stringify(req.headers, null, 2));
+    console.log('📊 Query params:', JSON.stringify(req.query, null, 2));
     
     if (!mcpServer) {
       return res.status(503).json({
@@ -124,22 +126,37 @@ app.get('/tools', async (req, res) => {
     
     const toolsResult = await mcpServer.listTools();
     
-    // Format tools for ElevenLabs
-    const formattedTools = toolsResult.tools.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.inputSchema || {},
-      type: 'function'
-    }));
+    // Format tools for ElevenLabs - try multiple formats to see what works
+    const formattedTools = toolsResult.tools.map(tool => {
+      return {
+        id: tool.name,
+        name: tool.name,
+        description: tool.description,
+        // Try minimal parameters first
+        parameters: {},
+        enabled: true,
+        type: 'function'
+      };
+    });
     
     console.log(`✅ Returning ${formattedTools.length} tools to ElevenLabs`);
     
-    res.json({
+    // Debug: Log first few tools for troubleshooting
+    if (formattedTools.length > 0) {
+      console.log('📋 Sample tools:', formattedTools.slice(0, 2).map(t => ({ name: t.name, description: t.description })));
+    } else {
+      console.log('⚠️ No tools found - check server initialization');
+    }
+    
+    // Format response to match ElevenLabs expected structure
+    const response = {
+      success: true,
       tools: formattedTools,
-      count: formattedTools.length,
-      server: 'Playwright MCP Server',
-      version: '1.0.0'
-    });
+      count: formattedTools.length
+    };
+    
+    console.log('📤 Sending response to ElevenLabs:', JSON.stringify(response, null, 2));
+    res.json(response);
     
   } catch (error) {
     console.error('❌ Error serving tools:', error);
