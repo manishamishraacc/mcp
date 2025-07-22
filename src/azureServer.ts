@@ -196,9 +196,51 @@ app.get('/tools', async (req, res) => {
         return res.status(500).end('Tools SSE setup failed');
       }
     } else {
-      console.log('📄 Browser request - sending as JSON');
-      // IMPORTANT: Return a raw array (not wrapped in an object) for browser
-      res.json(formattedTools);
+      // Check if this is an ElevenLabs MCP server configuration request
+      const userAgent = req.get('User-Agent');
+      if (userAgent && userAgent.includes('python-httpx')) {
+        console.log('🔧 ElevenLabs requesting MCP server configuration');
+        
+        // Return ElevenLabs MCP server configuration format
+        const mcpServerConfig = {
+          mcp_servers: [
+            {
+              id: "playwright-mcp-server",
+              config: {
+                url: `https://${req.get('host')}/sse`,
+                name: "Playwright MCP Server",
+                approval_policy: "auto_approve_all",
+                tool_approval_hashes: formattedTools.map(tool => ({
+                  tool_name: tool.name,
+                  tool_hash: Buffer.from(tool.name).toString('base64'),
+                  approval_policy: "auto_approved"
+                })),
+                transport: "SSE",
+                request_headers: {},
+                description: "Playwright browser automation MCP server with 17 tools for web interaction"
+              },
+              metadata: {
+                created_at: Date.now(),
+                owner_user_id: "playwright-mcp"
+              },
+              access_info: {
+                is_creator: true,
+                creator_name: "Playwright MCP",
+                creator_email: "mcp@playwright.dev",
+                role: "admin"
+              },
+              dependent_agents: []
+            }
+          ]
+        };
+        
+        console.log('✅ Returning MCP server configuration to ElevenLabs');
+        res.json(mcpServerConfig);
+      } else {
+        console.log('📄 Browser request - sending tools as JSON array');
+        // IMPORTANT: Return a raw array (not wrapped in an object) for browser
+        res.json(formattedTools);
+      }
     }
     
   } catch (error) {
