@@ -11,6 +11,7 @@ import { resolveCLIConfig } from './config.js';
 import { ElevenLabsHandler } from './elevenLabsIntegration.js';
 import { contextFactory } from './browserContextFactory.js';
 import { snapshotTools } from './tools.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 
 const app = express();
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -147,6 +148,54 @@ app.post('/api/mcp', async (req, res) => {
         message: error instanceof Error ? error.message : 'Internal error'
       }
     });
+  }
+});
+
+// MCP SSE endpoint for ElevenLabs integration
+const sessions = new Map();
+
+app.get('/sse', async (req, res) => {
+  try {
+    console.log('🔌 New MCP SSE connection');
+    
+    // Create SSE transport
+    const transport = new SSEServerTransport('/sse', res);
+    sessions.set(transport.sessionId, transport);
+    
+    console.log(`📡 Created SSE session: ${transport.sessionId}`);
+    
+    // Create MCP connection
+    const connection = await mcpServer.createConnection(transport);
+    
+    // Handle connection cleanup
+    res.on('close', () => {
+      console.log(`🔌 SSE session closed: ${transport.sessionId}`);
+      sessions.delete(transport.sessionId);
+      connection.close().catch(e => console.error('Error closing connection:', e));
+    });
+    
+  } catch (error) {
+    console.error('❌ Error setting up SSE connection:', error);
+    res.status(500).end('SSE setup failed');
+  }
+});
+
+app.post('/sse', async (req, res) => {
+  try {
+    const sessionId = new URL(req.url, `http://${req.headers.host}`).searchParams.get('sessionId');
+    if (!sessionId) {
+      return res.status(400).end('Missing sessionId');
+    }
+
+    const transport = sessions.get(sessionId);
+    if (!transport) {
+      return res.status(404).end('Session not found');
+    }
+
+    await transport.handlePostMessage(req, res);
+  } catch (error) {
+    console.error('❌ Error handling SSE POST:', error);
+    res.status(500).end('SSE POST failed');
   }
 });
 
