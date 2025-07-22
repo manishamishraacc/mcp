@@ -161,7 +161,6 @@ app.get('/tools', async (req, res) => {
       }
       
       return {
-        id: tool.name,
         name: tool.name,
         description: tool.description,
         parameters: parameters
@@ -200,44 +199,24 @@ app.get('/tools', async (req, res) => {
     } else {
       // Check if this is an ElevenLabs MCP server configuration request
       const userAgent = req.get('User-Agent');
-      if (userAgent && userAgent.includes('python-httpx')) {
-        console.log('🔧 ElevenLabs requesting MCP server configuration');
+      const referer = req.get('Referer');
+      const origin = req.get('Origin');
+      
+      console.log('🔍 Request analysis:', {
+        userAgent: userAgent?.substring(0, 100),
+        referer: referer?.substring(0, 100),
+        origin: origin?.substring(0, 100),
+        accept: req.get('Accept')?.substring(0, 100)
+      });
+      
+      // ElevenLabs makes requests from api.us.elevenlabs.io
+      if (origin?.includes('elevenlabs.io') || referer?.includes('elevenlabs.io') || userAgent?.includes('python-httpx')) {
+        console.log('🔧 ElevenLabs requesting tools - returning wrapped format');
         
-        // Return ElevenLabs MCP server configuration format
-        const mcpServerConfig = {
-          mcp_servers: [
-            {
-              id: "playwright-mcp-server",
-              config: {
-                url: `https://${req.get('host')}/mcp`,
-                name: "Playwright MCP Server", 
-                approval_policy: "auto_approve_all",
-                tool_approval_hashes: formattedTools.map(tool => ({
-                  tool_name: tool.name,
-                  tool_hash: Buffer.from(tool.name).toString('base64'),
-                  approval_policy: "auto_approved"
-                })),
-                transport: "HTTP",
-                request_headers: {},
-                description: "Playwright browser automation MCP server with 17 tools for web interaction"
-              },
-              metadata: {
-                created_at: Date.now(),
-                owner_user_id: "playwright-mcp"
-              },
-              access_info: {
-                is_creator: true,
-                creator_name: "Playwright MCP",
-                creator_email: "mcp@playwright.dev",
-                role: "admin"
-              },
-              dependent_agents: []
-            }
-          ]
-        };
-        
-        console.log('✅ Returning MCP server configuration to ElevenLabs');
-        res.json(mcpServerConfig);
+        // Return tools in the exact format ElevenLabs expects
+        res.json({
+          tools: formattedTools
+        });
       } else {
         console.log('📄 Browser request - sending tools as JSON array');
         // IMPORTANT: Return a raw array (not wrapped in an object) for browser
@@ -605,6 +584,69 @@ async function handleSSE(req: express.Request, res: express.Response, url: URL) 
   app.use('/mcp', async (req, res) => {
     try {
       console.log('🔌 New MCP StreamableHTTP request');
+      console.log('📊 Request method:', req.method);
+      console.log('📊 Request headers:', JSON.stringify(req.headers, null, 2));
+      
+      // Handle GET requests for tool listing (ElevenLabs compatibility)
+      if (req.method === 'GET') {
+        console.log('🛠️ ElevenLabs requesting tools via GET /mcp');
+        
+        if (!mcpServer) {
+          return res.status(503).json({
+            error: 'MCP Server not initialized',
+            message: 'Server is starting up, please try again'
+          });
+        }
+        
+        const toolsResult = await mcpServer.listTools();
+
+        if (!toolsResult || !toolsResult.tools || !Array.isArray(toolsResult.tools)) {
+          console.error('❌ Invalid tools result structure:', toolsResult);
+          return res.status(500).json({
+            error: 'Invalid tools result',
+            message: 'MCP server returned invalid tools structure'
+          });
+        }
+        
+        // Format tools exactly as ElevenLabs expects
+        const formattedTools = toolsResult.tools.map(tool => {
+          let parameters = {
+            type: "object",
+            properties: {},
+            required: []
+          };
+          
+          try {
+            // Convert tool inputSchema to JSON Schema format
+            if (tool.inputSchema && typeof tool.inputSchema === 'object') {
+              const schema = tool.inputSchema as any;
+              if (schema.properties) {
+                parameters = {
+                  type: "object",
+                  properties: schema.properties,
+                  required: schema.required || []
+                };
+              }
+            }
+          } catch (e) {
+            console.warn(`⚠️ Schema conversion failed for tool ${tool.name}:`, e);
+          }
+          
+          return {
+            name: tool.name,
+            description: tool.description,
+            parameters: parameters
+          };
+        });
+
+        console.log(`✅ Returning ${formattedTools.length} tools via /mcp`);
+        
+        // Return tools in the exact format ElevenLabs expects
+        res.json({
+          tools: formattedTools
+        });
+        return;
+      }
       
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
       if (sessionId) {
