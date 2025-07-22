@@ -124,21 +124,8 @@ app.get('/tools', async (req, res) => {
       });
     }
     
-    console.log('🔍 MCP Server status:', !!mcpServer);
-    console.log('🔍 MCP Server type:', typeof mcpServer);
-    
-    let toolsResult;
-    try {
-      toolsResult = await mcpServer.listTools();
-      console.log('🔍 Raw tools result:', toolsResult);
-    } catch (error) {
-      console.error('❌ Error getting tools from MCP server:', error);
-      return res.status(500).json({
-        error: 'Failed to get tools from MCP server',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-    
+    const toolsResult = await mcpServer.listTools();
+
     if (!toolsResult || !toolsResult.tools || !Array.isArray(toolsResult.tools)) {
       console.error('❌ Invalid tools result structure:', toolsResult);
       return res.status(500).json({
@@ -156,7 +143,7 @@ app.get('/tools', async (req, res) => {
       };
       
       try {
-        // Convert tool schema to JSON Schema format
+        // Convert tool inputSchema to JSON Schema format
         if (tool.inputSchema && typeof tool.inputSchema === 'object') {
           const schema = tool.inputSchema as any;
           if (schema.properties) {
@@ -172,15 +159,16 @@ app.get('/tools', async (req, res) => {
       }
       
       return {
+        id: tool.name,
         name: tool.name,
         description: tool.description,
         parameters: parameters
       };
     });
-    
+
     console.log(`✅ Returning ${formattedTools.length} tools to ElevenLabs`);
     
-    // Return simple array format as ElevenLabs expects
+    // IMPORTANT: Return a raw array (not wrapped in an object)
     res.json(formattedTools);
     
   } catch (error) {
