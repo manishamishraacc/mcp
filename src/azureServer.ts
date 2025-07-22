@@ -151,51 +151,53 @@ app.post('/api/mcp', async (req, res) => {
   }
 });
 
-// MCP SSE endpoint for ElevenLabs integration
+// MCP SSE endpoint for ElevenLabs integration  
 const sessions = new Map();
 
-app.get('/sse', async (req, res) => {
-  try {
+async function handleSSE(req: express.Request, res: express.Response, url: URL) {
+  if (req.method === 'POST') {
+    const sessionId = url.searchParams.get('sessionId');
+    if (!sessionId) {
+      res.statusCode = 400;
+      return res.end('Missing sessionId');
+    }
+
+    const transport = sessions.get(sessionId);
+    if (!transport) {
+      res.statusCode = 404;
+      return res.end('Session not found');
+    }
+
+    return await transport.handlePostMessage(req, res);
+  } else if (req.method === 'GET') {
     console.log('🔌 New MCP SSE connection');
     
-    // Create SSE transport
     const transport = new SSEServerTransport('/sse', res);
     sessions.set(transport.sessionId, transport);
     
     console.log(`📡 Created SSE session: ${transport.sessionId}`);
     
-    // Create MCP connection
     const connection = await mcpServer.createConnection(transport);
-    
-    // Handle connection cleanup
     res.on('close', () => {
       console.log(`🔌 SSE session closed: ${transport.sessionId}`);
       sessions.delete(transport.sessionId);
-      connection.close().catch(e => console.error('Error closing connection:', e));
+      void connection.close().catch(e => console.error('Error closing connection:', e));
     });
-    
-  } catch (error) {
-    console.error('❌ Error setting up SSE connection:', error);
-    res.status(500).end('SSE setup failed');
+    return;
   }
-});
 
-app.post('/sse', async (req, res) => {
+  res.statusCode = 405;
+  res.end('Method not allowed');
+}
+
+// Handle SSE requests
+app.use('/sse', async (req, res) => {
   try {
-    const sessionId = new URL(req.url, `http://${req.headers.host}`).searchParams.get('sessionId');
-    if (!sessionId) {
-      return res.status(400).end('Missing sessionId');
-    }
-
-    const transport = sessions.get(sessionId);
-    if (!transport) {
-      return res.status(404).end('Session not found');
-    }
-
-    await transport.handlePostMessage(req, res);
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    await handleSSE(req, res, url);
   } catch (error) {
-    console.error('❌ Error handling SSE POST:', error);
-    res.status(500).end('SSE POST failed');
+    console.error('❌ Error handling SSE request:', error);
+    res.status(500).end('SSE request failed');
   }
 });
 
